@@ -1,0 +1,129 @@
+---
+title: "Congress Report"
+author: "Alexander Harr"
+date: "2/5/2017"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library("knitr")
+library("httr")
+library("jsonlite")
+library("dplyr")
+base.uri <- "https://congress.api.sunlightfoundation.com/"
+search.query <- "oceans" 
+zip.code <- as.integer(95125)
+roll.id <- "s52-2017"
+options(scipen = 999)
+```
+#The purpose of this report is to generate a report of congressional representatives in the zip code `r zip.code`
+
+```{r district.reps, echo = FALSE}
+#Isolate data frame and flatten
+end.point <- "legislators/locate"
+response <- GET(paste0(base.uri, end.point), query = list(zip = zip.code))
+body <- fromJSON(content(response, "text"))
+df <- flatten(body$results) %>% select(first_name, last_name, state, party, phone)
+#Function to produce list output
+LocalRep <- function(row) {
+  temp <- df[row, ]
+  statement <- paste0(temp$first_name, " ", temp$last_name, " (", temp$state, "-", temp$party, "). Phone: ", temp$phone)
+  return(statement)
+}
+```
+The representatives for this district are 
+
+* `r LocalRep(1)`
+
+* `r LocalRep(2)`
+
+* `r LocalRep(3)`
+
+* `r LocalRep(4)`
+```{r Congressional.bills, echo = FALSE }
+end.point <- "bills/search"
+
+query.params <- list(query = search.query, history.active = "true", order = "introduced_on", per_page = 25)
+
+response <- GET(paste0(base.uri, end.point), query = query.params)
+
+body <- fromJSON(content(response, "text"))
+
+df <- flatten(body$results)
+
+df <- df %>% select(Bill = bill_id, Introduced = introduced_on, Title = official_title, Link = urls.congress)
+
+df$Link <- paste0("[Link](", df$Link, ")")
+
+table <- kable(df, format = "markdown", col.names = colnames(df))
+```
+#Congressional Bills
+The table below lists the 25 most recent bills regarding `r search.query` that are currently *being discussed by congress*. 
+
+`r table`
+
+```{r Voting.Issue, echo = FALSE }
+end.point <- "votes"
+
+query.params <- list(roll_id = roll.id, fields = "voters")
+
+get.request.result <- GET(paste0(base.uri, end.point), query = query.params)
+#sets the body of the content as a list
+request.body.as.list <- content(get.request.result)
+#then takes the list and acesses the first vector of the r.b.a.list which is another list and then
+#from that list accesses the voters
+voters.list <- request.body.as.list$results[[1]]$voters
+#the colnames and rownames are now renamed to have no value
+names(voters.list) <- NULL
+#parses the list into JSON
+voters.json <- toJSON(voters.list)
+#Creates a data frame from voters.json by flattening it 
+voters.as.data.frame <- flatten(fromJSON(voters.json, flatten=TRUE))
+
+small.df <- voters.as.data.frame %>% select(voter.first_name, voter.last_name, voter.party, vote)
+
+table <- kable(small.df, format = "markdown", col.names = colnames(small.df))
+```
+#Indivdual Votes
+These votes entail the motion to Invoke Colture on the Nomination of Elisabeth DeVos to be secretary of Education, click here for more [information](https://www.govtrack.us/congress/votes/115-2017/s52). 
+
+`r table`
+
+```{r party, echo = FALSE}
+end.point <- "votes"
+
+roll.id <- "s52-2017"
+
+query.params <- list(roll_id = roll.id, fields = "voters")
+
+get.request.result <- GET(paste0(base.uri, end.point), query = query.params)
+#sets the body of the content as a list
+request.body.as.list <- content(get.request.result)
+#then takes the list and acesses the first vector of the r.b.a.list which is another list and then
+#from that list accesses the voters
+voters.list <- request.body.as.list$results[[1]]$voters
+#the colnames and rownames are now renamed to have no value
+names(voters.list) <- NULL
+#parses the list into JSON
+voters.json <- toJSON(voters.list)
+#Creates a data frame from voters.json by flattening it 
+voters.as.data.frame <- flatten(fromJSON(voters.json, flatten=TRUE))
+small.df <- voters.as.data.frame %>% select(voter.first_name, voter.last_name, voter.party, vote)
+
+party.votes <- voters.as.data.frame %>% select(vote, voter.chamber, voter.party)
+
+republicans <- party.votes %>% filter(voter.party == "R") %>% mutate(did.vote.yes = vote == "Yea")
+
+democrats <- party.votes %>% filter(voter.party == "D") %>% mutate(did.vote.yes = vote == "Yea")
+
+independents <- party.votes %>% filter(voter.party == "I") %>% mutate(did.vote.yes = vote == "Yea")
+
+final <- data.frame(voter.party = c("R", "D", "I"),vote =  c("Yea", "Nay", "Nay"),chamber =  c("Senate", "Senate", "Senate"), total.party = 
+                    c(length(republicans$did.vote.yes), length(democrats$did.vote.yes), length(independents$did.vote.yes)), stringsAsFactors = FALSE)
+table <- kable(final, format = "markdown", col.names = colnames(final))
+table2 <- kable(party.votes, format = "markdown", col.names = colnames(party.votes))
+```
+The table below details the party breakdown of the votes and what each party voted for
+`r table`
+The table below details the party votes and individual votes
+`r table2`
